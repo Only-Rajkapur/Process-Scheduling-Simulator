@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Process Scheduling Simulator</title>
+    <link rel="stylesheet" href="index.css">
+</head><style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+    color: #ffffff;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+h1 {
+    text-align: center;
+    font-size: 2.5em;
+    margin-bottom: 10px;
+    background: linear-gradient(45deg, #00d4ff, #ff6b9d);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+h2 {
+    color: #00d4ff;
+    margin-bottom: 15px;
+    font-size: 1.5em;
+}
+
+.input-section, .controls, .output-section, .metrics, .explanation {
+    margin-bottom: 30px;
+    padding: 20px;
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+}
+
+th, td {
+    padding: 12px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+th {
+    background: rgba(0, 212, 255, 0.2);
+}
+
+input {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 8px;
+    border-radius: 5px;
+    width: 80px;
+}
+
+input::placeholder {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+button {
+    background: linear-gradient(45deg, #00d4ff, #0099cc);
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 25px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(0, 212, 255, 0.4);
+}
+
+.controls {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: bold;
+}
+
+.gantt-canvas {
+    display: block;
+    width: 100%;
+    height: 80px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+#ganttLegend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.legend-color {
+    width: 20px;
+    height: 12px;
+    border-radius: 2px;
+}
+
+#averages {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #ff6b9d;
+    margin-top: 10px;
+}
+
+.explanation {
+    background: rgba(0, 212, 255, 0.1);
+    border-left: 5px solid #00d4ff;
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 20px;
+    }
+    
+    .controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    input {
+        width: 100%;
+    }
+}
+</style>
+
+<body>
+    <script>
+        // Pro Level Process Scheduling Simulator
+
+class Process {
+    constructor(id, arrival, burst,priority = 5) {
+        this.id = id;
+        this.arrival = arrival;
+        this.burst = burst;
+        this.priority = priority; // 1=high, 10=low
+        this.remaining = burst;
+        this.completed = 0;
+        this.waiting = 0;
+        this.turnaround = 0;
+        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
+    }
+}
+
+class Simulator {
+    constructor(procs, algo, quantum = 2, speed = 200) {
+        this.procs = procs.map(p => new Process(p.id, p.arrival, p.burst, p.priority || 5));
+        this.algo = algo;
+        this.quantum = quantum;
+        this.speed = speed; // ms per time unit
+        this.time = 0;
+        this.ready = [];
+        this.running = null;
+        this.quantumCount = 0;
+        this.schedule = [];
+        this.completedProcs = 0;
+        this.isPlaying = false;
+        this.interval = null;
+    }
+
+    step() {
+        this.updateReady();
+        this.dispatch();
+        this.time++;
+        if (this.completedProcs >= this.procs.length) {
+            this.pause();
+            this.procs.forEach(p => {
+                p.turnaround = p.completed - p.arrival;
+                p.waiting = p.turnaround - p.burst;
+            });
+            renderMetrics(this.procs);
+        }
+        this.renderIncremental();
+    }
+
+    // Incremental Gantt render for animation
+    renderIncremental() {
+        const canvas = document.getElementById('ganttCanvas');
+        const ctx = canvas.getContext('2d');
+        const height = canvas.height;
+        const barHeight = 40;
+        const y = 20;
+        canvas.width = Math.max(1200, this.time * 30 + 200);
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.fillRect(0, 0, canvas.width, height);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        const scale = 30;
+        for (let t = 0; t <= this.time; t += 5) {
+            const x = t * scale;
+            ctx.fillRect(x, 10, 1, 10);
+            ctx.fillText(t.toString(), x, 8);
+        }
+
+        let currentX = 0;
+        this.schedule.forEach(seg => {
+            const proc = this.procs.find(p => p.id === seg.id);
+            ctx.fillStyle = proc.color;
+            ctx.fillRect(currentX, y, seg.duration * scale, barHeight);
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(seg.id, currentX + (seg.duration * scale / 2), y + barHeight / 2);
+            currentX += seg.duration * scale;
+        });
+
+        if (this.running) {
+            ctx.fillStyle = this.running.color;
+            ctx.fillRect(currentX, y, scale, barHeight);
+            ctx.fillStyle = 'white';
+            ctx.fillText(this.running.id, currentX + scale / 2, y + barHeight / 2);
+        }
+
+        renderLegend(this.procs);
+    }
+
+    play() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+        this.interval = setInterval(() => this.step(), this.speed);
+    }
+
+    pause() {
+        this.isPlaying = false;
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
+    }
+
+    reset() {
+        this.pause();
+        this.procs.forEach(p => {
+            p.remaining = p.burst;
+            p.completed = 0;
+            p.waiting = 0;
+            p.turnaround = 0;
+        });
+        this.time = 0;
+        this.ready = [];
+        this.running = null;
+        this.quantumCount = 0;
+        this.schedule = [];
+        this.completedProcs = 0;
+        renderCanvasIncremental(this);
+    }
+
+    updateReady() {
+        for (let p of this.procs) {
+            if (p.arrival <= this.time && p.remaining > 0 && !this.ready.includes(p) && p !== this.running) {
+                this.ready.push(p);
+            }
+        }
+    }
+
+    dispatch() {
+        if (this.running) {
+            this.running.remaining--;
+            this.quantumCount++;
+            this.schedule[this.schedule.length - 1].duration++; // extend last segment
+            if (this.running.remaining === 0) {
+                this.running.completed = this.time;
+                this.completedProcs++;
+                this.running = null;
+                this.quantumCount = 0;
+            } else if (this.algo === 'rr' && this.quantumCount >= this.quantum) {
+                this.ready.push(this.running);
+                this.running = null;
+                this.quantumCount = 0;
+            }
+        }
+
+        if (!this.running && this.ready.length > 0) {
+            this.running = this.selectNext();
+            if (this.running) {
+                this.ready = this.ready.filter(p => p !== this.running);
+                this.schedule.push({id: this.running.id, start: this.time, duration: 0, color: this.running.color});
+                this.quantumCount = 1;
+            }
+        }
+    }
+
+    selectNext() {
+        if (this.ready.length === 0) return null;
+        
+        // Priority-aware sorting: lower number = higher priority
+        const sortFn = (a, b) => {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            
+            switch (this.algo) {
+                case 'fcfs':
+                    return 0; // already arrival-sorted in ready
+                case 'sjf':
+                    return a.remaining - b.remaining;
+                case 'rr':
+                    return 0; // FIFO within priority
+            }
+            return 0;
+        };
+        
+        this.ready.sort(sortFn);
+        return this.ready.shift();
+    }
+}
+
+// UI Functions
+
+let currentSim = null;
+let animationSpeed = 200;
+
+function addRow() {
+    const tbody = document.querySelector('#processTable tbody');
+    const index = tbody.rows.length;
+    const row = tbody.insertRow();
+    row.innerHTML = `
+        <td><label>PID: <input type="text" class="pid" placeholder="P${index + 1}" value="P${index + 1}"></label></td>
+        <td><label>Arr: <input type="number" min="0" value="0" class="arrival"></label></td>
+        <td><label>Burst: <input type="number" min="1" value="3" class="burst"></label></td>
+        <td><label>Pri: <input type="number" min="1" max="10" value="5" class="priority"></label></td>
+        <td><button onclick="removeRow(this)">Remove</button></td>
+    `;
+}
+
+function removeRow(btn) {
+    btn.closest('tr').remove();
+}
+
+function loadPreset() {
+    const tbody = document.querySelector('#processTable tbody');
+    tbody.innerHTML = `
+        <tr>
+            <td><label>PID: <input type="text" class="pid" value="P1"></label></td>
+            <td><label>Arr: <input type="number" value="0" class="arrival"></label></td>
+            <td><label>Burst: <input type="number" value="24" class="burst"></label></td>
+            <td><label>Pri: <input type="number" min="1" max="10" value="1" class="priority"></label></td>
+            <td><button onclick="removeRow(this)">Remove</button></td>
+        </tr>
+        <tr>
+            <td><label>PID: <input type="text" class="pid" value="P2"></label></td>
+            <td><label>Arr: <input type="number" value="3" class="arrival"></label></td>
+            <td><label>Burst: <input type="number" value="3" class="burst"></label></td>
+            <td><label>Pri: <input type="number" min="1" max="10" value="5" class="priority"></label></td>
+            <td><button onclick="removeRow(this)">Remove</button></td>
+        </tr>
+        <tr>
+            <td><label>PID: <input type="text" class="pid" value="P3"></label></td>
+            <td><label>Arr: <input type="number" value="1" class="arrival"></label></td>
+            <td><label>Burst: <input type="number" value="3" class="burst"></label></td>
+            <td><label>Pri: <input type="number" min="1" max="10" value="10" class="priority"></label></td>
+            <td><button onclick="removeRow(this)">Remove</button></td>
+        </tr>
+    `;
+}
+
+function clearAll() {
+    const tbody = document.querySelector('#processTable tbody');
+    tbody.innerHTML = `
+        <tr>
+            <td><label>PID: <input type="text" class="pid" value="P1"></label></td>
+            <td><label>Arr: <input type="number" value="0" class="arrival"></label></td>
+            <td><label>Burst: <input type="number" value="5" class="burst"></label></td>
+            <td><label>Pri: <input type="number" min="1" max="10" value="5" class="priority"></label></td>
+            <td><button onclick="removeRow(this)">Remove</button></td>
+        </tr>
+    `;
+    if (currentSim) currentSim.reset();
+    const canvas = document.getElementById('ganttCanvas');
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    document.querySelector('#metricsTable tbody').innerHTML = '';
+    document.getElementById('averages').innerHTML = '';
+    document.getElementById('ganttLegend').innerHTML = '';
+    document.getElementById('status').textContent = '';
+}
+
+function validateInputs() {
+    const rows = document.querySelectorAll('#processTable tbody tr');
+    for (let row of rows) {
+        const burst = parseInt(row.querySelector('.burst').value);
+        const priority = parseInt(row.querySelector('.priority').value);
+        if (isNaN(burst) || burst <= 0) {
+            alert('Burst time must be positive number');
+            return false;
+        }
+        if (isNaN(priority) || priority < 1 || priority > 10) {
+            alert('Priority must be 1-10 (1=highest)');
+            return false;
+        }
+    }
+    return true;
+}
+
+function startAnimation() {
+    if (!validateInputs()) return;
+
+    const rows = document.querySelectorAll('#processTable tbody tr');
+    const inputProcs = [];
+    rows.forEach(row => {
+        const pid = row.querySelector('.pid').value || 'P';
+        const arrival = parseInt(row.querySelector('.arrival').value);
+        const burst = parseInt(row.querySelector('.burst').value);
+        const priority = parseInt(row.querySelector('.priority').value) || 5;
+        inputProcs.push({id: pid, arrival, burst, priority});
+    });
+
+    const algo = document.getElementById('algorithm').value;
+    const quantum = parseInt(document.getElementById('quantum').value);
+    animationSpeed = parseInt(document.getElementById('speedSlider').value);
+
+    currentSim = new Simulator(inputProcs, algo, quantum, animationSpeed);
+    currentSim.reset();
+    document.getElementById('status').textContent = 'Ready - Click Play to start!';
+}
+
+function runSimulation() {
+    startAnimation();
+    // Backward compat - fast run
+    while (currentSim && currentSim.completedProcs < currentSim.procs.length) {
+        currentSim.step();
+    }
+}
+
+function renderCanvasGantt(sim, schedule) {
+    const canvas = document.getElementById('ganttCanvas');
+    const ctx = canvas.getContext('2d');
+    const height = canvas.height;
+    const barHeight = 40;
+    const y = 20;
+    canvas.width = Math.max(1200, schedule.reduce((sum, s) => sum + s.duration, 0) * 30);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.fillRect(0, 0, canvas.width, height);
+
+    // Timeline ticks
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    const scale = 30;
+    for (let t = 0; t <= sim.time; t += 5) {
+        const x = t * scale;
+        ctx.fillRect(x, 10, 1, 10);
+        ctx.fillText(t.toString(), x, 8);
+    }
+
+    // Bars
+    let currentX = 0;
+    schedule.forEach((seg, i) => {
+        const proc = sim.procs.find(p => p.id === seg.id);
+        ctx.fillStyle = proc.color;
+        ctx.fillRect(currentX, y, seg.duration * scale, barHeight);
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(seg.id, currentX + (seg.duration * scale / 2), y + barHeight / 2);
+        currentX += seg.duration * scale;
+    });
+
+    // Legend
+    renderLegend(sim.procs);
+}
+
+function renderLegend(procs) {
+    const legend = document.getElementById('ganttLegend');
+    legend.innerHTML = '';
+    procs.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `
+            <div class="legend-color" style="background: ${p.color}"></div>
+            ${p.id}
+        `;
+        legend.appendChild(item);
+    });
+}
+
+function renderMetrics(procs) {
+    const tbody = document.querySelector('#metricsTable tbody');
+    tbody.innerHTML = '';
+    let totalTAT = 0, totalWT = 0;
+    procs.forEach(p => {
+        totalTAT += p.turnaround;
+        totalWT += p.waiting;
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td>${p.id}</td>
+            <td>${p.completed}</td>
+            <td>${p.turnaround.toFixed(1)}</td>
+            <td>${p.waiting.toFixed(1)}</td>
+        `;
+    });
+    const avgTAT = totalTAT / procs.length;
+    const avgWT = totalWT / procs.length;
+    document.getElementById('averages').innerHTML = `
+        Avg TAT: ${avgTAT.toFixed(1)} | Avg WT: ${avgWT.toFixed(1)}
+    `;
+}
+
+    </script>
+    <div class="container">
+        <h1>Process Scheduling Simulator</h1>
+        <p>Demonstrates FCFS, SJF, and Round Robin algorithms. See how OS decides process execution order.</p>
+
+        <!-- Process Input -->
+        <section class="input-section">
+            <h2>Add Processes</h2>
+            <table id="processTable">
+                <thead>
+<tr>
+                        <th>PID</th>
+                        <th>Arrival</th>
+                        <th>Burst</th>
+                       <th>Priority</th>
+                     
+                        <th>Action</th>
+                    </tr>
+                </thead>
+            <tbody>
+                    <tr>
+                        <td><label>PID: <input type="text" id="pid0" placeholder="P1" class="pid" value="P1"></label></td>
+                        <td><label>Arr: <input type="number" id="arrival0" min="0" value="0" class="arrival"></label></td>
+                        <td><label>Burst: <input type="number" id="burst0" min="1" value="5" class="burst"></label></td>
+                       <td><label>Pri: <input type="number" id="priority0" min="1" max="10" value="5" class="priority"></label></td>
+                        <td><button onclick="removeRow(this)">Remove</button></td>
+                    </tr>
+                </tbody>
+            </table>
+            <button onclick="addRow()">Add Process</button>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls">
+            <label>Algorithm:
+                <select id="algorithm">
+                    <option value="fcfs">FCFS (Non-preemptive)</option>
+                    <option value="sjf">SJF(Non-preemptive)</option>
+                    <option value="rr">Round Robin</option>
+                </select>
+            </label>
+            <label>Quantum (RR): <input type="number" id="quantum" min="1" value="2" class="quantum"></label>
+            <label>Speed (ms/step): 
+                <input type="range" id="speedSlider" min="50" max="1000" value="200" class="speed-slider">
+                <span id="speedValue">200ms</span>
+            </label>
+            <div class="animation-controls">
+                <button onclick="startAnimation()">Start</button>
+                <button onclick="currentSim.play()">▶ Play</button>
+                <button onclick="currentSim.pause()">⏸ Pause</button>
+                <button onclick="currentSim.step()">⏭ Step</button>
+                <button onclick="currentSim.reset()">🔄 Reset</button>
+            </div>
+            <!--<button onclick="clearAll()">Clear All</button>
+            <button onclick="loadPreset()">Load Preset</button>
+            <button onclick="runSimulation()">Run</button>
+            <span id="status" class="status"></span>-->
+        </section>
+
+        <!-- Gantt Chart -->
+        <section class="output-section">
+            <h2>Gantt Chart</h2>
+            <canvas id="ganttCanvas" width="1400" height="80" class="gantt-canvas"></canvas>
+            <div id="ganttLegend"></div>
+        </section>
+
+        <!-- Metrics -->
+        <section class="metrics">
+            <h2>Process Metrics</h2>
+            <table id="metricsTable">
+                <thead>
+                    <tr>
+                        <th>PID</th>
+                        <th>Completion Time</th>
+                        <th>Turnaround Time</th>
+                        <th>Waiting Time</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div id="averages"></div>
+        </section>
+
+        <!-- Explanation -->
+        <section class="explanation">
+            <h2>How It Works</h2>
+            <div id="explanationText">
+                Select algorithm and add processes with arrival and burst times. Click Run to see execution order, Gantt chart, and metrics.<br><br>
+                <strong>FCFS:</strong> First-Come-First-Served (queue order).<br>
+                <strong>SJF:</strong> Shortest Job First (smallest burst runs next).<br>
+                <strong>RR:</strong> Round Robin (time slices via quantum).
+            </div>
+        </section>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
